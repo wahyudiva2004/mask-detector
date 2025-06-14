@@ -4,6 +4,8 @@ import numpy as np
 import joblib
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
 import os
+import requests
+import gdown
 
 # Konfigurasi halaman
 st.set_page_config(
@@ -25,18 +27,86 @@ st.sidebar.markdown("""
 - Tekan 'STOP' untuk menghentikan
 """)
 
+# Fungsi untuk download model dari Google Drive
+@st.cache_data
+def download_model_from_gdrive():
+    """Download model dari Google Drive"""
+    try:
+        model_path = 'mask_detector_svm.pkl'
+
+        # Jika model sudah ada, skip download
+        if os.path.exists(model_path):
+            return True
+
+        st.sidebar.info("📥 Downloading model dari Google Drive...")
+
+        # Beberapa opsi URL untuk mencoba download
+        # Anda perlu share file mask_detector_svm.pkl secara individual dan dapatkan link-nya
+        possible_urls = [
+            # URL direct download - akan diupdate setelah Anda share file individual
+            "https://drive.google.com/uc?export=download&id=YOUR_FILE_ID",
+            # Backup URL jika ada
+        ]
+
+        for url in possible_urls:
+            try:
+                if "YOUR_FILE_ID" in url:
+                    continue  # Skip placeholder URL
+
+                st.sidebar.info(f"🔄 Mencoba download dari: {url[:50]}...")
+
+                # Download dengan requests
+                response = requests.get(url, stream=True)
+                response.raise_for_status()
+
+                with open(model_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+                if os.path.exists(model_path) and os.path.getsize(model_path) > 1000:  # File harus > 1KB
+                    st.sidebar.success("✅ Model berhasil didownload!")
+                    return True
+
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ URL gagal: {str(e)}")
+                continue
+
+        st.sidebar.error("❌ Semua URL download gagal!")
+        return False
+
+    except Exception as e:
+        st.sidebar.error(f"❌ Error downloading model: {str(e)}")
+        return False
+
 # Load model dan cascade classifier
 def load_model():
     try:
         model_path = 'mask_detector_svm.pkl'
+
+        # Coba load model lokal
         if os.path.exists(model_path):
             model = joblib.load(model_path)
             st.sidebar.success("✅ Model berhasil dimuat!")
             st.sidebar.info(f"📁 File: {model_path}")
             return model
         else:
-            st.sidebar.error("❌ File model tidak ditemukan!")
-            st.sidebar.info("Silakan jalankan train_mask_detector.py terlebih dahulu")
+            # Coba download dari Google Drive
+            st.sidebar.warning("⚠️ Model tidak ditemukan!")
+            st.sidebar.info("🔄 Mencoba download dari Google Drive...")
+
+            if download_model_from_gdrive():
+                # Coba load lagi setelah download
+                if os.path.exists(model_path):
+                    model = joblib.load(model_path)
+                    st.sidebar.success("✅ Model berhasil dimuat dari Google Drive!")
+                    return model
+
+            # Jika download gagal, tampilkan opsi manual
+            st.sidebar.info("💡 Opsi tersedia:")
+            st.sidebar.info("1. Upload dataset untuk training")
+            st.sidebar.info("2. Download manual dari Google Drive")
+            st.sidebar.info("3. Jalankan train_mask_detector.py lokal")
             return None
     except Exception as e:
         st.sidebar.error(f"❌ Error loading model: {str(e)}")
@@ -164,34 +234,56 @@ def main():
         if model is None:
             st.error("🚨 **Model tidak ditemukan!**")
 
-            # Debug info
-            st.info("🔍 **Debug Info:**")
-            st.write(f"- File exists: {os.path.exists('mask_detector_svm.pkl')}")
-            if os.path.exists('mask_detector_svm.pkl'):
-                st.write(f"- File size: {os.path.getsize('mask_detector_svm.pkl'):,} bytes")
+            # Opsi download model
+            st.markdown("### 📥 Download Model")
+            st.info("**Model sudah tersedia di Google Drive!**")
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                st.markdown("**🔗 Download Manual:**")
+                st.markdown("[📁 Download Model dari Google Drive](https://drive.google.com/drive/folders/13T37blgVcSNz89xmzWscxhnXRLc4-HhM?usp=sharing)")
+                st.caption("1. Buka link di atas")
+                st.caption("2. Download file `mask_detector_svm.pkl`")
+                st.caption("3. Upload ke aplikasi ini")
+
+            with col2:
+                st.markdown("**📤 Upload Model:**")
+                uploaded_model = st.file_uploader(
+                    "Upload file model (.pkl)",
+                    type=['pkl'],
+                    help="Upload file mask_detector_svm.pkl yang sudah didownload"
+                )
+
+                if uploaded_model is not None:
+                    try:
+                        # Save uploaded model
+                        with open('mask_detector_svm.pkl', 'wb') as f:
+                            f.write(uploaded_model.getbuffer())
+                        st.success("✅ Model berhasil diupload!")
+                        st.info("🔄 Refresh halaman untuk menggunakan model")
+                        if st.button("🔄 Refresh Sekarang"):
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error upload model: {str(e)}")
+
+            # Alternatif training
+            st.markdown("### 🎯 Atau Train Model Sendiri")
 
             if not has_dataset:
                 st.warning("📦 **Dataset belum tersedia**")
-                st.info("**Langkah-langkah untuk menjalankan aplikasi:**")
-
-                # Tombol download dataset
-                st.markdown("### 1. Download Dataset")
-                st.markdown("Klik link berikut untuk download dataset:")
+                st.markdown("**Download dataset untuk training:**")
                 st.markdown("🔗 [Download Dataset](https://drive.google.com/file/d/191ugrhUoIAuN3Q6To4goadPMIgQMzt0U/view?usp=sharing)")
 
-                st.markdown("### 2. Ekstrak Dataset")
+                st.markdown("**Ekstrak dataset:**")
                 st.code("""
-Ekstrak file zip ke folder:
 dataset/
 ├── with_mask/     ← Gambar orang pakai masker
 └── without_mask/  ← Gambar orang tanpa masker
                 """)
 
-                st.markdown("### 3. Training Model")
+                st.markdown("**Training model:**")
                 st.code("python train_mask_detector.py")
-
-                st.markdown("### 4. Refresh Halaman")
-                st.info("Setelah training selesai, refresh halaman ini")
 
             else:
                 st.success(f"✅ Dataset tersedia: {with_mask_count} with_mask, {without_mask_count} without_mask")
