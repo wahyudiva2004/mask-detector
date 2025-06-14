@@ -1,6 +1,6 @@
 # 🎭 Real-Time Mask Detector
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://your-app-url.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://mask-detector-wahyu.streamlit.app)
 
 **Pengolahan Citra - Project**
 
@@ -8,9 +8,9 @@ Aplikasi deteksi masker real-time menggunakan webcam dengan teknologi machine le
 
 ## 🌐 Live Demo
 
-**[🚀 Try the Live App](https://your-app-url.streamlit.app)**
+**[🚀 Try the Live App](https://mask-detector.streamlit.app)**
 
-> **Note**: Ganti `your-app-url` dengan URL aplikasi Streamlit Anda setelah deployment
+> **Note**: Aplikasi sudah live! Model perlu di-train terlebih dahulu untuk fitur deteksi.
 
 ## 🌟 Fitur
 
