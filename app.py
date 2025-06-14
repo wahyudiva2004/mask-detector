@@ -180,7 +180,7 @@ class MaskDetectorProcessor(VideoProcessorBase):
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             cv2.putText(img, "Silakan upload model atau restart", (50, 100),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            return img
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
 
         self.frame_count += 1
 
@@ -453,7 +453,7 @@ dataset/
             with col2:
                 st.subheader("📊 Status")
 
-                if webrtc_ctx.video_transformer:
+                if webrtc_ctx.video_processor:
                     st.success("🟢 Kamera aktif")
                     st.info("🔍 Deteksi berjalan...")
                 else:
