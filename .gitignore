@@ -40,7 +40,7 @@ Thumbs.db
 dataset/
 
 # Model files (too large for GitHub - will be trained on cloud)
-# *.pkl
+*.pkl
 
 # Logs
 *.log
