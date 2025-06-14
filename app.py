@@ -23,66 +23,65 @@ st.markdown("**Deteksi penggunaan masker secara real-time menggunakan webcam**")
 # Info singkat
 st.info("📹 Klik **START** untuk memulai deteksi | 🟢 Hijau = Mask | 🔴 Merah = No Mask")
 
-# Auto-download model dari Google Drive
-@st.cache_data
-def download_model():
-    """Download model dari Google Drive jika belum ada"""
+# Download model dengan optimasi performa
+@st.cache_data(show_spinner=False)
+def download_model_optimized():
+    """Download model dengan optimasi untuk mengurangi lag"""
     model_path = 'mask_detector_svm.pkl'
 
-    # Jika model sudah ada, skip download
+    # Jika model sudah ada dan valid, skip download
     if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
         return True
 
     try:
-        st.info("📥 Downloading model dari Google Drive...")
-
         # Google Drive file ID
         file_id = "1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4"
 
-        # Progress bar
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        # Download di background tanpa blocking UI
+        with st.spinner("🔄 Loading model... (first time only)"):
+            # Gunakan direct download URL yang lebih cepat
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
 
-        # Download dengan gdown (lebih reliable)
-        status_text.text("🔄 Memulai download...")
-        progress_bar.progress(10)
+            # Download dengan requests (lebih kontrol)
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
 
-        url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, model_path, quiet=True)
+            # Tulis file secara streaming
+            with open(model_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
 
-        progress_bar.progress(90)
-        status_text.text("✅ Verifikasi file...")
-
-        # Verifikasi file berhasil didownload
+        # Verifikasi file
         if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
-            progress_bar.progress(100)
-            status_text.text("✅ Model berhasil didownload!")
-            time.sleep(1)
-            progress_bar.empty()
-            status_text.empty()
             return True
         else:
-            st.error("❌ Download gagal - file terlalu kecil")
             return False
 
     except Exception as e:
-        st.error(f"❌ Error downloading model: {str(e)}")
-        return False
+        # Fallback ke gdown jika requests gagal
+        try:
+            with st.spinner("🔄 Trying alternative download..."):
+                gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=True)
+                return os.path.exists(model_path) and os.path.getsize(model_path) > 100000
+        except:
+            return False
 
-# Load model (dengan auto-download)
-@st.cache_resource
-def load_model():
-    """Load model SVM untuk deteksi mask"""
+# Load model dengan optimasi
+@st.cache_resource(show_spinner=False)
+def load_model_optimized():
+    """Load model dengan optimasi untuk mengurangi lag"""
     model_path = 'mask_detector_svm.pkl'
 
-    # Coba download dulu jika belum ada
+    # Coba download dulu jika belum ada (non-blocking)
     if not os.path.exists(model_path):
-        if not download_model():
+        if not download_model_optimized():
             return None
 
     try:
-        model = joblib.load(model_path)
-        st.success("✅ Model berhasil dimuat!")
+        # Load model dengan progress indicator minimal
+        with st.spinner("🤖 Initializing AI model..."):
+            model = joblib.load(model_path)
         return model
     except Exception as e:
         st.error(f"❌ Error loading model: {e}")
@@ -104,11 +103,11 @@ def load_face_cascade():
 # Class untuk video processor (sama seperti detect_mask_webcam.py)
 class MaskDetectorProcessor(VideoProcessorBase):
     def __init__(self):
-        self.model = load_model()
+        self.model = load_model_optimized()
         self.face_cascade = load_face_cascade()
         self.IMG_SIZE = 100
         self.frame_count = 0
-        self.process_every_n_frames = 3  # Sama seperti desktop app
+        self.process_every_n_frames = 5  # Increase untuk mengurangi lag
         self.last_faces = []  # Cache hasil deteksi terakhir
 
         # FPS tracking
@@ -135,23 +134,24 @@ class MaskDetectorProcessor(VideoProcessorBase):
             self.fps_start_time = time.time()
             self.fps_frame_count = 0
 
-        # Proses deteksi hanya setiap N frame untuk performa (sama seperti desktop)
+        # Proses deteksi dengan optimasi untuk mengurangi lag
         if self.frame_count % self.process_every_n_frames == 0:
-            # Resize frame untuk deteksi lebih cepat
-            small_frame = cv2.resize(img, (320, 240))
+            # Resize frame lebih kecil untuk deteksi super cepat
+            small_frame = cv2.resize(img, (240, 180))  # Lebih kecil dari sebelumnya
             gray_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
 
-            # Deteksi wajah di frame kecil
+            # Deteksi wajah dengan parameter yang lebih cepat
             faces_small = self.face_cascade.detectMultiScale(
                 gray_small,
-                scaleFactor=1.1,
-                minNeighbors=5,  # Sama seperti desktop
-                minSize=(30, 30)  # Sama seperti desktop
+                scaleFactor=1.2,  # Lebih besar = lebih cepat
+                minNeighbors=3,   # Lebih kecil = lebih cepat
+                minSize=(20, 20), # Lebih kecil = lebih cepat
+                flags=cv2.CASCADE_SCALE_IMAGE  # Optimasi tambahan
             )
 
             # Scale kembali koordinat ke ukuran asli
-            scale_x = img.shape[1] / 320
-            scale_y = img.shape[0] / 240
+            scale_x = img.shape[1] / 240
+            scale_y = img.shape[0] / 180
 
             faces = []
             for (x, y, w, h) in faces_small:
@@ -224,51 +224,66 @@ RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
 })
 
-# Main app (dengan auto-download)
+# Main app (dengan optimasi performa)
 def main():
-    # Load model (akan auto-download jika belum ada)
-    model = load_model()
+    # Load model dengan optimasi (akan auto-download jika belum ada)
+    model = load_model_optimized()
 
     if model is None:
         st.error("🚨 **Model tidak dapat dimuat!**")
-        st.markdown("### 🔄 Solusi:")
 
+        # Status dan solusi
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("🔄 Coba Download Ulang"):
-                st.cache_data.clear()
-                st.cache_resource.clear()
-                st.rerun()
+            st.markdown("### 🔄 Auto-Download")
+            if st.button("🚀 Download Model"):
+                with st.spinner("Downloading... Please wait"):
+                    st.cache_data.clear()
+                    st.cache_resource.clear()
+                    st.rerun()
+
+            st.info("💡 Model akan didownload otomatis (~472MB)")
 
         with col2:
-            st.markdown("**📤 Upload Manual:**")
+            st.markdown("### 📤 Manual Upload")
             uploaded_model = st.file_uploader(
                 "Upload mask_detector_svm.pkl",
                 type=['pkl'],
-                help="Backup option jika auto-download gagal"
+                help="Backup jika auto-download lambat"
             )
 
             if uploaded_model is not None:
                 try:
                     with open('mask_detector_svm.pkl', 'wb') as f:
                         f.write(uploaded_model.getbuffer())
-                    st.success("✅ Model berhasil diupload!")
+                    st.success("✅ Model uploaded!")
                     if st.button("🔄 Refresh"):
                         st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
 
-        st.info("💡 Model akan otomatis didownload dari Google Drive saat pertama kali diakses")
+        # Tips untuk mengurangi lag
+        st.markdown("### ⚡ Tips untuk Performa Optimal:")
+        st.info("""
+        - Gunakan koneksi internet yang stabil
+        - Tutup aplikasi lain yang menggunakan kamera
+        - Refresh halaman jika terasa lag
+        - Model akan ter-cache setelah first load
+        """)
 
     else:
-        # WebRTC streamer
+        # WebRTC streamer dengan optimasi untuk mengurangi lag
         webrtc_ctx = webrtc_streamer(
             key="mask-detector",
             video_processor_factory=MaskDetectorProcessor,
             rtc_configuration=RTC_CONFIGURATION,
             media_stream_constraints={
-                "video": True,
+                "video": {
+                    "width": {"ideal": 640},    # Resolusi optimal
+                    "height": {"ideal": 480},   # Tidak terlalu tinggi
+                    "frameRate": {"ideal": 15}  # FPS lebih rendah = less lag
+                },
                 "audio": False
             },
             async_processing=True,
