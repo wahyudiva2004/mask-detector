@@ -40,39 +40,77 @@ def download_model_from_gdrive():
 
         st.sidebar.info("📥 Downloading model dari Google Drive...")
 
-        # Beberapa opsi URL untuk mencoba download
-        # Anda perlu share file mask_detector_svm.pkl secara individual dan dapatkan link-nya
+        # Google Drive file ID dari link yang Anda berikan
+        file_id = "1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4"
+
+        # Beberapa format URL Google Drive untuk mencoba download
         possible_urls = [
-            # URL direct download - akan diupdate setelah Anda share file individual
-            "https://drive.google.com/uc?export=download&id=YOUR_FILE_ID",
-            # Backup URL jika ada
+            f"https://drive.google.com/uc?export=download&id={file_id}",
+            f"https://drive.google.com/uc?id={file_id}&export=download",
+            f"https://docs.google.com/uc?export=download&id={file_id}",
         ]
 
-        for url in possible_urls:
+        for i, url in enumerate(possible_urls):
             try:
-                if "YOUR_FILE_ID" in url:
-                    continue  # Skip placeholder URL
 
-                st.sidebar.info(f"🔄 Mencoba download dari: {url[:50]}...")
+                st.sidebar.info(f"🔄 Mencoba download metode {i+1}/3...")
 
                 # Download dengan requests
-                response = requests.get(url, stream=True)
+                session = requests.Session()
+                response = session.get(url, stream=True)
+
+                # Handle Google Drive virus scan warning untuk file besar
+                if response.status_code == 200:
+                    # Cek apakah ada virus scan warning
+                    if 'virus scan warning' in response.text.lower() or 'download anyway' in response.text.lower():
+                        # Extract download link dari halaman warning
+                        import re
+                        download_link = re.search(r'href="(/uc\?export=download[^"]+)"', response.text)
+                        if download_link:
+                            confirm_url = "https://drive.google.com" + download_link.group(1).replace('&amp;', '&')
+                            response = session.get(confirm_url, stream=True)
+
                 response.raise_for_status()
+
+                # Download file
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
 
                 with open(model_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+                            downloaded += len(chunk)
 
-                if os.path.exists(model_path) and os.path.getsize(model_path) > 1000:  # File harus > 1KB
+                            # Show progress untuk file besar
+                            if total_size > 0:
+                                progress = downloaded / total_size
+                                st.sidebar.progress(progress)
+
+                # Verifikasi file berhasil didownload
+                if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:  # File harus > 100KB
                     st.sidebar.success("✅ Model berhasil didownload!")
                     return True
+                else:
+                    st.sidebar.warning(f"⚠️ File terlalu kecil: {os.path.getsize(model_path) if os.path.exists(model_path) else 0} bytes")
 
             except Exception as e:
                 st.sidebar.warning(f"⚠️ URL gagal: {str(e)}")
                 continue
 
-        st.sidebar.error("❌ Semua URL download gagal!")
+        # Jika semua URL gagal, coba dengan gdown
+        st.sidebar.info("🔄 Mencoba dengan gdown...")
+        try:
+            gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
+
+            if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
+                st.sidebar.success("✅ Model berhasil didownload dengan gdown!")
+                return True
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ gdown juga gagal: {str(e)}")
+
+        st.sidebar.error("❌ Semua metode download gagal!")
+        st.sidebar.info("💡 Silakan gunakan upload manual di bawah")
         return False
 
     except Exception as e:
@@ -242,10 +280,15 @@ def main():
 
             with col1:
                 st.markdown("**🔗 Download Manual:**")
-                st.markdown("[📁 Download Model dari Google Drive](https://drive.google.com/drive/folders/13T37blgVcSNz89xmzWscxhnXRLc4-HhM?usp=sharing)")
+                st.markdown("[📁 Download Model dari Google Drive](https://drive.google.com/file/d/1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4/view?usp=sharing)")
                 st.caption("1. Buka link di atas")
-                st.caption("2. Download file `mask_detector_svm.pkl`")
-                st.caption("3. Upload ke aplikasi ini")
+                st.caption("2. Klik 'Download' untuk download file")
+                st.caption("3. Upload file ke aplikasi ini")
+
+                # Tombol untuk trigger download otomatis
+                if st.button("🚀 Coba Download Otomatis"):
+                    st.cache_data.clear()
+                    st.rerun()
 
             with col2:
                 st.markdown("**📤 Upload Model:**")
