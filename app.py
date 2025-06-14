@@ -16,7 +16,7 @@ st.set_page_config(
 
 # Judul aplikasi
 st.title("🎭 Real-Time Mask Detector")
-st.markdown("**Deteksi penggunaan masker secara real-time**")
+st.markdown("**Deteksi penggunaan masker secara real-time menggunakan webcam**")
 
 # Info singkat
 st.info("📹 Klik **START** untuk memulai deteksi | 🟢 Hijau = Mask | 🔴 Merah = No Mask")
