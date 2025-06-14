@@ -6,6 +6,8 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 import av
 import os
 import time
+import requests
+import gdown
 
 # Konfigurasi halaman
 st.set_page_config(
@@ -21,22 +23,69 @@ st.markdown("**Deteksi penggunaan masker secara real-time menggunakan webcam**")
 # Info singkat
 st.info("📹 Klik **START** untuk memulai deteksi | 🟢 Hijau = Mask | 🔴 Merah = No Mask")
 
-# Load model (simple version)
+# Auto-download model dari Google Drive
+@st.cache_data
+def download_model():
+    """Download model dari Google Drive jika belum ada"""
+    model_path = 'mask_detector_svm.pkl'
+
+    # Jika model sudah ada, skip download
+    if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
+        return True
+
+    try:
+        st.info("📥 Downloading model dari Google Drive...")
+
+        # Google Drive file ID
+        file_id = "1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4"
+
+        # Progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        # Download dengan gdown (lebih reliable)
+        status_text.text("🔄 Memulai download...")
+        progress_bar.progress(10)
+
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, model_path, quiet=True)
+
+        progress_bar.progress(90)
+        status_text.text("✅ Verifikasi file...")
+
+        # Verifikasi file berhasil didownload
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
+            progress_bar.progress(100)
+            status_text.text("✅ Model berhasil didownload!")
+            time.sleep(1)
+            progress_bar.empty()
+            status_text.empty()
+            return True
+        else:
+            st.error("❌ Download gagal - file terlalu kecil")
+            return False
+
+    except Exception as e:
+        st.error(f"❌ Error downloading model: {str(e)}")
+        return False
+
+# Load model (dengan auto-download)
 @st.cache_resource
 def load_model():
     """Load model SVM untuk deteksi mask"""
     model_path = 'mask_detector_svm.pkl'
 
-    if os.path.exists(model_path):
-        try:
-            model = joblib.load(model_path)
-            st.success("✅ Model berhasil dimuat!")
-            return model
-        except Exception as e:
-            st.error(f"❌ Error loading model: {e}")
+    # Coba download dulu jika belum ada
+    if not os.path.exists(model_path):
+        if not download_model():
             return None
-    else:
-        st.error("❌ Model tidak ditemukan! Upload file `mask_detector_svm.pkl`")
+
+    try:
+        model = joblib.load(model_path)
+        st.success("✅ Model berhasil dimuat!")
+        return model
+    except Exception as e:
+        st.error(f"❌ Error loading model: {e}")
         return None
 
 @st.cache_resource
@@ -175,39 +224,44 @@ RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
 })
 
-# Main app (simple version)
+# Main app (dengan auto-download)
 def main():
-    # Load model
+    # Load model (akan auto-download jika belum ada)
     model = load_model()
 
     if model is None:
-        st.error("🚨 **Model tidak ditemukan!**")
-        st.markdown("### 📤 Upload Model")
+        st.error("🚨 **Model tidak dapat dimuat!**")
+        st.markdown("### 🔄 Solusi:")
 
-        uploaded_model = st.file_uploader(
-            "Upload file mask_detector_svm.pkl",
-            type=['pkl'],
-            help="Upload file model yang sudah didownload"
-        )
+        col1, col2 = st.columns(2)
 
-        if uploaded_model is not None:
-            try:
-                # Save uploaded model
-                with open('mask_detector_svm.pkl', 'wb') as f:
-                    f.write(uploaded_model.getbuffer())
-                st.success("✅ Model berhasil diupload!")
-                st.info("🔄 Refresh halaman untuk menggunakan model")
-                if st.button("🔄 Refresh Sekarang"):
-                    st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error upload model: {str(e)}")
+        with col1:
+            if st.button("🔄 Coba Download Ulang"):
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                st.rerun()
 
-        st.markdown("### 🔗 Download Model")
-        st.markdown("[📁 Download dari Google Drive](https://drive.google.com/file/d/1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4/view?usp=sharing)")
+        with col2:
+            st.markdown("**📤 Upload Manual:**")
+            uploaded_model = st.file_uploader(
+                "Upload mask_detector_svm.pkl",
+                type=['pkl'],
+                help="Backup option jika auto-download gagal"
+            )
+
+            if uploaded_model is not None:
+                try:
+                    with open('mask_detector_svm.pkl', 'wb') as f:
+                        f.write(uploaded_model.getbuffer())
+                    st.success("✅ Model berhasil diupload!")
+                    if st.button("🔄 Refresh"):
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+
+        st.info("💡 Model akan otomatis didownload dari Google Drive saat pertama kali diakses")
 
     else:
-        st.success("✅ Model siap digunakan!")
-
         # WebRTC streamer
         webrtc_ctx = webrtc_streamer(
             key="mask-detector",
