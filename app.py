@@ -23,68 +23,111 @@ st.markdown("**Deteksi penggunaan masker secara real-time menggunakan webcam**")
 # Info singkat
 st.info("📹 Klik **START** untuk memulai deteksi | 🟢 Hijau = Mask | 🔴 Merah = No Mask")
 
-# Download model dengan optimasi performa
+# Download model dengan multiple fallback methods
 @st.cache_data(show_spinner=False)
 def download_model_optimized():
-    """Download model dengan optimasi untuk mengurangi lag"""
+    """Download model dengan multiple fallback untuk reliability"""
     model_path = 'mask_detector_svm.pkl'
 
     # Jika model sudah ada dan valid, skip download
-    if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
+    if os.path.exists(model_path) and os.path.getsize(model_path) > 1000000:  # Minimal 1MB
         return True
 
-    try:
-        # Google Drive file ID
-        file_id = "1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4"
+    file_id = "1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4"
 
-        # Download di background tanpa blocking UI
-        with st.spinner("🔄 Loading model... (first time only)"):
-            # Gunakan direct download URL yang lebih cepat
+    # Method 1: Direct download dengan requests
+    try:
+        with st.spinner("🔄 Downloading model... (Method 1/3)"):
             url = f"https://drive.google.com/uc?export=download&id={file_id}"
 
-            # Download dengan requests (lebih kontrol)
-            response = requests.get(url, stream=True)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            response = requests.get(url, headers=headers, stream=True, timeout=30)
             response.raise_for_status()
 
-            # Tulis file secara streaming
             with open(model_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
 
-        # Verifikasi file
-        if os.path.exists(model_path) and os.path.getsize(model_path) > 100000:
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 1000000:
             return True
-        else:
-            return False
-
     except Exception as e:
-        # Fallback ke gdown jika requests gagal
-        try:
-            with st.spinner("🔄 Trying alternative download..."):
-                gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=True)
-                return os.path.exists(model_path) and os.path.getsize(model_path) > 100000
-        except:
-            return False
+        st.warning(f"Method 1 failed: {str(e)[:50]}...")
 
-# Load model dengan optimasi
+    # Method 2: gdown library
+    try:
+        with st.spinner("🔄 Downloading model... (Method 2/3)"):
+            gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=True)
+
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 1000000:
+            return True
+    except Exception as e:
+        st.warning(f"Method 2 failed: {str(e)[:50]}...")
+
+    # Method 3: Alternative URL format
+    try:
+        with st.spinner("🔄 Downloading model... (Method 3/3)"):
+            url = f"https://docs.google.com/uc?export=download&id={file_id}"
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+
+            with open(model_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 1000000:
+            return True
+    except Exception as e:
+        st.error(f"All download methods failed. Last error: {str(e)[:100]}")
+
+    return False
+
+# Load model dengan robust error handling
 @st.cache_resource(show_spinner=False)
 def load_model_optimized():
-    """Load model dengan optimasi untuk mengurangi lag"""
+    """Load model dengan robust error handling dan fallback"""
     model_path = 'mask_detector_svm.pkl'
 
-    # Coba download dulu jika belum ada (non-blocking)
+    # Cek apakah file model ada dan valid
     if not os.path.exists(model_path):
+        st.info("📥 Model tidak ditemukan, mencoba download...")
         if not download_model_optimized():
+            st.error("❌ Download gagal. Silakan upload manual.")
+            return None
+
+    # Verifikasi ukuran file
+    if os.path.getsize(model_path) < 1000000:  # Kurang dari 1MB = corrupt
+        st.warning("⚠️ File model corrupt, mencoba download ulang...")
+        os.remove(model_path)
+        if not download_model_optimized():
+            st.error("❌ Re-download gagal. Silakan upload manual.")
             return None
 
     try:
-        # Load model dengan progress indicator minimal
-        with st.spinner("🤖 Initializing AI model..."):
+        # Load model dengan error handling
+        with st.spinner("🤖 Loading AI model..."):
             model = joblib.load(model_path)
-        return model
+
+        # Verifikasi model valid
+        if hasattr(model, 'predict') and hasattr(model, 'decision_function'):
+            st.success("✅ Model berhasil dimuat dan siap digunakan!")
+            return model
+        else:
+            st.error("❌ Model format tidak valid")
+            return None
+
     except Exception as e:
-        st.error(f"❌ Error loading model: {e}")
+        error_msg = str(e)
+        st.error(f"❌ Error loading model: {error_msg[:100]}")
+
+        # Jika error karena versi scikit-learn, berikan saran
+        if "version" in error_msg.lower():
+            st.warning("⚠️ Kemungkinan masalah versi scikit-learn. Coba upload model yang kompatibel.")
+
         return None
 
 @st.cache_resource
@@ -232,44 +275,77 @@ def main():
     if model is None:
         st.error("🚨 **Model tidak dapat dimuat!**")
 
+        # Debug info
+        model_path = 'mask_detector_svm.pkl'
+        if os.path.exists(model_path):
+            file_size = os.path.getsize(model_path)
+            st.info(f"📁 File ditemukan: {file_size:,} bytes")
+            if file_size < 1000000:
+                st.warning("⚠️ File terlalu kecil - kemungkinan corrupt")
+        else:
+            st.info("📁 File model tidak ditemukan")
+
         # Status dan solusi
         col1, col2 = st.columns(2)
 
         with col1:
             st.markdown("### 🔄 Auto-Download")
-            if st.button("🚀 Download Model"):
-                with st.spinner("Downloading... Please wait"):
-                    st.cache_data.clear()
-                    st.cache_resource.clear()
+            if st.button("🚀 Download Model", type="primary"):
+                # Clear cache dan coba download
+                st.cache_data.clear()
+                st.cache_resource.clear()
+
+                # Hapus file corrupt jika ada
+                if os.path.exists(model_path):
+                    os.remove(model_path)
+
+                with st.spinner("Downloading model... Please wait"):
+                    time.sleep(1)  # Give time for file deletion
                     st.rerun()
 
             st.info("💡 Model akan didownload otomatis (~472MB)")
+            st.caption("Proses download mungkin memakan waktu 1-2 menit")
 
         with col2:
             st.markdown("### 📤 Manual Upload")
             uploaded_model = st.file_uploader(
                 "Upload mask_detector_svm.pkl",
                 type=['pkl'],
-                help="Backup jika auto-download lambat"
+                help="Backup jika auto-download gagal"
             )
 
             if uploaded_model is not None:
                 try:
-                    with open('mask_detector_svm.pkl', 'wb') as f:
+                    # Hapus file lama jika ada
+                    if os.path.exists(model_path):
+                        os.remove(model_path)
+
+                    # Save file baru
+                    with open(model_path, 'wb') as f:
                         f.write(uploaded_model.getbuffer())
-                    st.success("✅ Model uploaded!")
-                    if st.button("🔄 Refresh"):
+
+                    file_size = os.path.getsize(model_path)
+                    st.success(f"✅ Model uploaded! ({file_size:,} bytes)")
+
+                    if st.button("🔄 Load Model", type="primary"):
+                        st.cache_resource.clear()
                         st.rerun()
+
                 except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                    st.error(f"❌ Upload error: {str(e)}")
+
+        # Download link sebagai backup
+        st.markdown("### 🔗 Manual Download")
+        st.markdown("[📁 Download dari Google Drive](https://drive.google.com/file/d/1z6CFkbbyDFsuMLPMHEQ9pI-zlM1x13s4/view?usp=sharing)")
+        st.caption("Jika auto-download gagal, download manual lalu upload di atas")
 
         # Tips untuk mengurangi lag
         st.markdown("### ⚡ Tips untuk Performa Optimal:")
         st.info("""
-        - Gunakan koneksi internet yang stabil
+        - Gunakan koneksi internet yang stabil untuk download
         - Tutup aplikasi lain yang menggunakan kamera
         - Refresh halaman jika terasa lag
-        - Model akan ter-cache setelah first load
+        - Model akan ter-cache setelah berhasil dimuat
         """)
 
     else:
