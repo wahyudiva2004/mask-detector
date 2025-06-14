@@ -159,71 +159,141 @@ def load_face_cascade():
         st.error(f"Error loading face cascade: {str(e)}")
         return None
 
-# Class untuk video transformer
+# Class untuk video transformer dengan optimasi performa
 class MaskDetectorTransformer(VideoTransformerBase):
     def __init__(self):
         self.model = load_model()
         self.face_cascade = load_face_cascade()
         self.IMG_SIZE = 100
-        
+        self.frame_count = 0
+        self.process_every_n_frames = 2  # Proses setiap 2 frame untuk performa
+        self.last_faces = []  # Cache hasil deteksi terakhir
+        self.last_predictions = {}  # Cache prediksi untuk setiap wajah
+
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        
+
         if self.model is None or self.face_cascade is None:
             # Jika model tidak ada, tampilkan frame asli dengan pesan
-            cv2.putText(img, "Model tidak tersedia", (50, 50), 
+            cv2.putText(img, "Model tidak tersedia", (50, 50),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(img, "Silakan upload model atau restart", (50, 100),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return img
-        
-        # Deteksi wajah
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
-        
-        # Proses setiap wajah yang terdeteksi
-        for (x, y, w, h) in faces:
-            # Extract wajah
-            face = img[y:y+h, x:x+w]
-            face_resized = cv2.resize(face, (self.IMG_SIZE, self.IMG_SIZE))
-            face_flat = face_resized.flatten().reshape(1, -1)
-            
-            # Prediksi
-            try:
-                prediction = self.model.predict(face_flat)[0]
-                confidence = self.model.decision_function(face_flat)[0]
-                
-                # Label dan warna
-                if prediction == 0:  # Dengan masker
-                    label = "Mask"
-                    color = (0, 255, 0)  # Hijau
-                    emoji = "😷"
-                else:  # Tanpa masker
-                    label = "No Mask"
-                    color = (0, 0, 255)  # Merah
-                    emoji = "😐"
-                
-                # Gambar rectangle dan text
-                cv2.rectangle(img, (x, y), (x+w, y+h), color, 3)
-                
-                # Label dengan emoji
-                label_text = f"{emoji} {label}"
-                cv2.putText(img, label_text, (x, y-15), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                
-                # Confidence score
-                conf_text = f"Conf: {abs(confidence):.2f}"
-                cv2.putText(img, conf_text, (x, y+h+20), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-                
-            except Exception as e:
-                # Jika error dalam prediksi
-                cv2.rectangle(img, (x, y), (x+w, y+h), (255, 255, 0), 2)
-                cv2.putText(img, "Error", (x, y-10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-        
+
+        self.frame_count += 1
+
+        # Proses deteksi hanya setiap N frame untuk performa
+        if self.frame_count % self.process_every_n_frames == 0:
+            # Resize frame untuk deteksi lebih cepat
+            small_img = cv2.resize(img, (320, 240))
+            gray_small = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
+
+            # Deteksi wajah di frame kecil
+            faces_small = self.face_cascade.detectMultiScale(
+                gray_small,
+                scaleFactor=1.1,
+                minNeighbors=4,  # Reduced untuk performa
+                minSize=(20, 20)
+            )
+
+            # Scale kembali koordinat ke ukuran asli
+            scale_x = img.shape[1] / 320
+            scale_y = img.shape[0] / 240
+
+            faces = []
+            for (x, y, w, h) in faces_small:
+                faces.append((
+                    int(x * scale_x),
+                    int(y * scale_y),
+                    int(w * scale_x),
+                    int(h * scale_y)
+                ))
+
+            self.last_faces = faces
+
+            # Update prediksi untuk wajah yang terdeteksi
+            self.last_predictions = {}
+            for i, (x, y, w, h) in enumerate(faces):
+                try:
+                    # Extract dan resize wajah
+                    face = img[y:y+h, x:x+w]
+                    if face.size == 0:
+                        continue
+
+                    face_resized = cv2.resize(face, (self.IMG_SIZE, self.IMG_SIZE))
+                    face_flat = face_resized.flatten().reshape(1, -1)
+
+                    # Prediksi
+                    prediction = self.model.predict(face_flat)[0]
+                    confidence = abs(self.model.decision_function(face_flat)[0])
+
+                    # Simpan prediksi
+                    self.last_predictions[i] = {
+                        'prediction': prediction,
+                        'confidence': confidence
+                    }
+
+                except Exception as e:
+                    # Jika error dalam prediksi
+                    self.last_predictions[i] = {
+                        'prediction': -1,  # Error flag
+                        'confidence': 0
+                    }
+        else:
+            # Gunakan hasil deteksi sebelumnya
+            faces = self.last_faces
+
+        # Gambar hasil deteksi
+        for i, (x, y, w, h) in enumerate(faces):
+            if i in self.last_predictions:
+                pred_data = self.last_predictions[i]
+                prediction = pred_data['prediction']
+                confidence = pred_data['confidence']
+
+                if prediction == -1:  # Error case
+                    cv2.rectangle(img, (x, y), (x+w, y+h), (255, 255, 0), 2)
+                    cv2.putText(img, "Error", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                else:
+                    # Label dan warna
+                    if prediction == 0:  # Dengan masker
+                        label = "Mask"
+                        color = (0, 255, 0)  # Hijau
+                        emoji = "😷"
+                    else:  # Tanpa masker
+                        label = "No Mask"
+                        color = (0, 0, 255)  # Merah
+                        emoji = "😐"
+
+                    # Gambar rectangle dan text
+                    cv2.rectangle(img, (x, y), (x+w, y+h), color, 3)
+
+                    # Background untuk text agar lebih jelas
+                    label_text = f"{emoji} {label}"
+                    text_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                    cv2.rectangle(img, (x, y-35), (x + text_size[0], y), color, -1)
+
+                    # Text label
+                    cv2.putText(img, label_text, (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+                    # Confidence score
+                    conf_text = f"Conf: {confidence:.2f}"
+                    cv2.putText(img, conf_text, (x, y+h+20),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            else:
+                # Wajah terdeteksi tapi belum ada prediksi
+                cv2.rectangle(img, (x, y), (x+w, y+h), (128, 128, 128), 2)
+                cv2.putText(img, "Processing...", (x, y-10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (128, 128, 128), 2)
+
         # Tambahkan informasi di pojok kiri atas
-        cv2.putText(img, f"Wajah terdeteksi: {len(faces)}", (10, 30), 
+        cv2.putText(img, f"Faces: {len(faces)}", (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
+        cv2.putText(img, f"Frame: {self.frame_count}", (10, 60),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
         return img
 
 # Konfigurasi RTC untuk WebRTC
