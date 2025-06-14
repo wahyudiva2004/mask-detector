@@ -256,8 +256,12 @@ class MaskDetectorTransformer(VideoTransformerBase):
                     cv2.putText(img, "Error", (x, y-10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
                 else:
-                    # Label dan warna
-                    if prediction == 0:  # Dengan masker
+                    # Label dan warna berdasarkan confidence
+                    if confidence < 0.5:  # Confidence rendah
+                        label = "No Mask"
+                        color = (0, 0, 255)  # Merah
+                        emoji = "????"  # Seperti di screenshot
+                    elif prediction == 0:  # Dengan masker
                         label = "Mask"
                         color = (0, 255, 0)  # Hijau
                         emoji = "😷"
@@ -266,33 +270,53 @@ class MaskDetectorTransformer(VideoTransformerBase):
                         color = (0, 0, 255)  # Merah
                         emoji = "😐"
 
-                    # Gambar rectangle dan text
-                    cv2.rectangle(img, (x, y), (x+w, y+h), color, 3)
+                    # Gambar rectangle dengan border tebal seperti screenshot
+                    cv2.rectangle(img, (x, y), (x+w, y+h), color, 4)
 
-                    # Background untuk text agar lebih jelas
+                    # Background untuk text label (seperti di screenshot)
                     label_text = f"{emoji} {label}"
-                    text_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                    cv2.rectangle(img, (x, y-35), (x + text_size[0], y), color, -1)
+                    text_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)[0]
 
-                    # Text label
-                    cv2.putText(img, label_text, (x, y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    # Background rectangle untuk label dengan padding
+                    cv2.rectangle(img, (x, y-45), (x + text_size[0] + 20, y), color, -1)
 
-                    # Confidence score
+                    # Text label dengan font lebih besar dan bold
+                    cv2.putText(img, label_text, (x + 10, y-15),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+
+                    # Confidence score di bawah kotak dengan font lebih besar
                     conf_text = f"Conf: {confidence:.2f}"
-                    cv2.putText(img, conf_text, (x, y+h+20),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                    cv2.putText(img, conf_text, (x, y+h+30),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
             else:
                 # Wajah terdeteksi tapi belum ada prediksi
                 cv2.rectangle(img, (x, y), (x+w, y+h), (128, 128, 128), 2)
                 cv2.putText(img, "Processing...", (x, y-10),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (128, 128, 128), 2)
 
-        # Tambahkan informasi di pojok kiri atas
-        cv2.putText(img, f"Faces: {len(faces)}", (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(img, f"Frame: {self.frame_count}", (10, 60),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Tambahkan informasi seperti di screenshot
+        # Hitung FPS estimasi
+        import time
+        if not hasattr(self, 'fps_start_time'):
+            self.fps_start_time = time.time()
+            self.fps_frame_count = 0
+            self.current_fps = 0
+
+        self.fps_frame_count += 1
+        if time.time() - self.fps_start_time >= 1.0:
+            self.current_fps = self.fps_frame_count / (time.time() - self.fps_start_time)
+            self.fps_start_time = time.time()
+            self.fps_frame_count = 0
+
+        # Tampilkan FPS dan Faces seperti di screenshot
+        cv2.putText(img, f"FPS: {self.current_fps:.1f}", (10, 40),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+        cv2.putText(img, f"Faces: {len(faces)}", (10, 80),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+
+        # Tambahkan instruksi di bawah
+        cv2.putText(img, "Press 'q' to quit, 's' for screenshot",
+                   (10, img.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         return img
 
