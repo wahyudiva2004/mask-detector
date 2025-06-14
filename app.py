@@ -2,7 +2,8 @@ import streamlit as st
 import cv2
 import numpy as np
 import joblib
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+import av
 import os
 import requests
 import gdown
@@ -159,8 +160,8 @@ def load_face_cascade():
         st.error(f"Error loading face cascade: {str(e)}")
         return None
 
-# Class untuk video transformer dengan optimasi performa
-class MaskDetectorTransformer(VideoTransformerBase):
+# Class untuk video processor dengan optimasi performa (API baru)
+class MaskDetectorProcessor(VideoProcessorBase):
     def __init__(self):
         self.model = load_model()
         self.face_cascade = load_face_cascade()
@@ -170,7 +171,7 @@ class MaskDetectorTransformer(VideoTransformerBase):
         self.last_faces = []  # Cache hasil deteksi terakhir
         self.last_predictions = {}  # Cache prediksi untuk setiap wajah
 
-    def transform(self, frame):
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
 
         if self.model is None or self.face_cascade is None:
@@ -318,7 +319,7 @@ class MaskDetectorTransformer(VideoTransformerBase):
         cv2.putText(img, "Press 'q' to quit, 's' for screenshot",
                    (10, img.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        return img
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # Konfigurasi RTC untuk WebRTC
 RTC_CONFIGURATION = RTCConfiguration({
@@ -437,10 +438,10 @@ dataset/
             with col1:
                 st.subheader("📹 Live Camera Feed")
 
-                # WebRTC streamer
+                # WebRTC streamer dengan API baru
                 webrtc_ctx = webrtc_streamer(
                     key="mask-detector-main",
-                    video_transformer_factory=MaskDetectorTransformer,
+                    video_processor_factory=MaskDetectorProcessor,
                     rtc_configuration=RTC_CONFIGURATION,
                     media_stream_constraints={
                         "video": True,
